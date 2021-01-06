@@ -1,0 +1,63 @@
+﻿
+<div class="row searchactionrow">
+    <div class="col-md-6">
+        <div class="input-group">
+            <form @onsubmit="@SearchClick">
+                <input type="text" name="" placeholder="Search For ..." @bind="searchTerm" @onkeyup="RunLookup">
+                @if (SearchOptions != null && SearchOptions.Count > 0)
+                {
+                    <select @bind="@filter">
+                        @foreach (var opt in SearchOptions)
+                        {
+                            <option>@opt</option>
+                        }
+                    </select>
+                }
+                <input class="btn btn-default" type="submit" name="" value="Search" disabled="@disableSearchButton">
+                @if (filterIsOn)
+                {
+                    <input class="btn btn-default btnClear" value="Clear" @onclick="ClearFilter">
+                }
+            </form>
+        </div>
+    </div>
+</div>
+
+        @code {
+
+            [Parameter] public List<string> SearchOptions { get; set; } = new List<string>();
+            [Parameter] public Func<string, string, Task> OnSearchClick { get; set; } = null;
+
+            private string searchTerm = "";
+            private string filter = "";
+            private bool filterIsOn = false;
+            private bool disableSearchButton = true;
+
+            protected override void OnInitialized()
+            {
+                if (SearchOptions == null)
+                {
+                    SearchOptions = new List<string>();
+                }
+            }
+
+            private void SearchClick()
+            {
+                filterIsOn = true;
+                OnSearchClick(searchTerm, filter);
+            }
+
+            private void ClearFilter()
+            {
+                searchTerm = "";
+                filter = "";
+                filterIsOn = false;
+                OnSearchClick(searchTerm, filter);
+                StateHasChanged();
+            }
+
+            private void RunLookup(KeyboardEventArgs e)
+            {
+                disableSearchButton = false;
+            }
+        }

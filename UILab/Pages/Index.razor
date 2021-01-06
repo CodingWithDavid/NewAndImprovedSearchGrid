@@ -1,0 +1,266 @@
+﻿@page "/"
+
+@using UILab.Data
+@using InternalLib
+@using UILab.UIControls.DataGrid
+@using UILab.UIControls.UIPagination
+
+@inject WeatherForecastService ForecastService
+@inject IJSRuntime JSRuntime;
+
+
+<h1>Weather forecast</h1>
+
+<p>This component demonstrates fetching data from a service.</p>
+
+@if (data == null)
+{
+    @if (spinning)
+    {
+        <div class="spinner" style="background-image: url(@spinnerbgImage);"></div>
+    }
+}
+else
+{
+    @if (spinning)
+    {
+        <div class="spinner" style="background-image: url(@spinnerbgImage);"></div>
+    }
+
+    <UILab.UIControls.SearchBox.SearchBox SearchOptions="filterOptions" OnSearchClick="NewSearch" />
+
+    <table class="table table-bordered table-striped table-hover table-sm" id="datatable">
+        <thead style="background-color:darkgray">
+            <tr>
+                <th @onclick='(() => Sort("Date", 0))'>
+                    <span>Date</span>
+                    <span class="fa @(gridService.GetSortStyle(0, sortIndex, sortDirection))"></span>
+                </th>
+
+                <th @onclick='(() => Sort("Summary", 1))'>
+                    <span>Summary</span>
+                    <span class="fa @(gridService.GetSortStyle(1, sortIndex, sortDirection))"></span>
+                </th>
+                <th @onclick='(() => Sort("TemperatureC", 2))'>
+                    <span>Temperature C</span>
+                    <span class="fa @(gridService.GetSortStyle(2, sortIndex, sortDirection))"></span>
+                </th>
+                <th @onclick='(() => Sort("TemperatureF", 3))'>
+                    <span>Temperature F</span>
+                    <span class="fa @(gridService.GetSortStyle(3, sortIndex, sortDirection)) "></span>
+                </th>
+            </tr>
+        </thead>
+        <tbody>
+            @for (int i = 0; i < data.Count; i++)
+            {
+                int index = i + 1;
+                <tr @onclick='(() => RowClickEvent(index))'>
+                    <td>@data[i].Date.ToShortDateString()</td>
+                    <td>@data[i].Summary</td>
+                    <td>@data[i].TemperatureC</td>
+                    <td>@data[i].TemperatureF</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+
+    <Pagination CurrentPage=@gridService.CurrentPage PageCount=@gridService.PageCount VisiblePages="5" OnPageChanged="GetPage" />
+    @if (filterOn)
+    {
+        <p class="noresults">Filtered Record Count: @filteredRecordCount</p>
+    }
+    <h4 class="noresults">@searchMessage</h4>
+    <h4>Total Records: @dataCollection.Count</h4>
+}
+
+@code {
+
+    private List<WeatherForecast> data;
+    private List<WeatherForecast> dataCollection;
+    private DataGridService<WeatherForecast> gridService = new DataGridService<WeatherForecast>();
+    private bool sortDirection = false;
+    private int sortIndex = 0;
+    private string spinnerbgImage = "img/spinner.gif";
+    private bool spinning = true;
+    private string searchTerm = "";
+    private bool filterOn = false;
+    private int filteredRecordCount = 0;
+    private string searchMessage = "";
+    private List<string> filterOptions = new List<string>();
+
+    delegate Task GetNextPage(int page);
+
+    protected override async Task OnInitializedAsync()
+    {
+        spinning = true;
+        await Task.Delay(1);
+
+        dataCollection = await ForecastService.GetForecastAsync(DateTime.Now);
+        //setup grid service
+        gridService.PageSize = 15;
+        gridService.CurrentPage = 1;
+        gridService.PageCount = gridService.GetPageCount(gridService.PageSize, dataCollection.Count);
+        data = gridService.GetPage(dataCollection.AsQueryable(), 1);
+
+        //set get next page function
+        GetNextPage GetNewPage = GetPage;
+
+        //set filter options
+        filterOptions.Add("Date");
+        filterOptions.Add("Summary");
+        filterOptions.Add("TemperatureC");
+        filterOptions.Add("TemperatureF");
+
+        spinning = false;
+    }
+
+    public async Task Sort(string sortProperty, int index)
+    {
+        string sortDir = "OrderBy";
+
+        if (!sortDirection)
+        {
+            sortDir = "OrderByDescending";
+        }
+
+        data = gridService.Sort(data.AsQueryable(), sortProperty, sortDir).ToList();
+        sortDirection = !sortDirection;
+        sortIndex = index;
+
+        await JSRuntime.InvokeVoidAsync("hightlight_row", 0);
+    }
+
+    private async Task RowClickEvent(int rowIndex)
+    {
+        await JSRuntime.InvokeVoidAsync("hightlight_row", rowIndex);
+    }
+
+    public Task GetPage(int page)
+    {
+        data = gridService.GetPage(dataCollection.AsQueryable(), page).ToList();
+        gridService.CurrentPage = page;
+        JSRuntime.InvokeVoidAsync("hightlight_row", 0);
+        this.StateHasChanged();
+        return null;
+    }
+
+    #region Search Box
+
+    protected Task NewSearch(string term, string filter)
+    {
+        if (string.IsNullOrEmpty(term))
+        {
+            //clear filter
+            ClearFilter();
+        }
+        else if (string.IsNullOrEmpty(filter))
+        {
+            //just search
+            searchTerm = term;
+            Search();
+        }
+        else
+        {
+            //apply filter
+            ApplyFilter(filter, term);
+        }
+        return null;
+    }
+
+    protected void Search()
+    {
+        if (searchTerm.IsNotEmpty())
+        {
+            var t = dataCollection
+                .Where(x => x.Summary.ToLower().Contains(searchTerm))
+                .Union(from c in dataCollection
+                       .Where(x => (x.TemperatureC.ToString() ?? null).ToLower().Contains(searchTerm))
+                       select c)
+                .Union(from c in dataCollection
+                       .Where(x => (x.TemperatureF.ToString() ?? String.Empty).ToLower().Contains(searchTerm))
+                       select c)
+                .Union(from c in dataCollection
+                       .Where(x => (x.Date.ToShortDateString() ?? String.Empty).ToLower().Contains(searchTerm))
+                       select c);
+
+            RefreshGridValues(t.ToList());
+        }
+    }
+
+    private void RefreshGridValues(List<WeatherForecast> matches)
+    {
+        //set search var
+        filterOn = false;
+        filteredRecordCount = 0;
+        searchMessage = "";
+
+        if (matches.Any())
+        {
+            //update grid
+            gridService.PageCount = gridService.GetPageCount(gridService.PageSize, matches.Count);
+            data = gridService.GetPage(matches.AsQueryable(), 1);
+            filterOn = true;
+            filteredRecordCount = matches.Count;
+        }
+        else
+        {
+            data.Clear();
+            searchMessage = "No results found";
+        }
+        searchTerm = "";
+        this.StateHasChanged();
+    }
+
+    private void ApplyFilter(string filter, string searchTerm)
+    {
+        if (!string.IsNullOrEmpty(filter))
+        {
+            //set search var
+            filteredRecordCount = 0;
+            searchMessage = "";
+            List<WeatherForecast> matches = new List<WeatherForecast>();
+
+            if (filter == "Summary")
+            {
+                matches = (from a in dataCollection
+                           where (a.Summary.ToLower().Contains(searchTerm))
+                           select a).ToList();
+
+            }
+            if (filter == "Date")
+            {
+                matches = (from a in dataCollection
+                           where (a.Date.ToShortDateString().ToLower().Contains(searchTerm))
+                           select a).ToList();
+
+            }
+            if (filter == "TemperatureC")
+            {
+                matches = (from a in dataCollection
+                           where (a.TemperatureC.ToString().Contains(searchTerm))
+                           select a).ToList();
+
+            }
+            if (filter == "TemperatureF")
+            {
+                matches = (from a in dataCollection
+                           where (a.TemperatureF.ToString().Contains(searchTerm))
+                           select a).ToList();
+
+            }
+
+            RefreshGridValues(matches);
+        }
+    }
+
+    private void ClearFilter()
+    {
+        filterOn = false;
+        data = gridService.GetPage(dataCollection.AsQueryable(), 1);
+        searchTerm = "";
+        searchMessage = "";
+        this.StateHasChanged();
+    }
+    #endregion
+}
